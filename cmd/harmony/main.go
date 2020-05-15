@@ -85,7 +85,7 @@ var (
 	// networkType indicates the type of the network
 	networkType = flag.String("network_type", "mainnet", "type of the network: mainnet, testnet, pangaea, partner, stressnet, devnet, localnet")
 	// blockPeriod indicates the how long the leader waits to propose a new block.
-	blockPeriod = flag.Int("block_period", 8, "how long in second the leader waits to propose a new block.")
+	blockPeriod = flag.Int("block_period", 4, "how long in second the leader waits to propose a new block.")
 	// staking indicates whether the node is operating in staking mode.
 	stakingFlag = flag.Bool("staking", false, "whether the node should operate in staking mode")
 	// shardID indicates the shard ID of this node
@@ -124,7 +124,6 @@ func initSetup() {
 	if addr := *pprof; addr != "" {
 		go func() { http.ListenAndServe(addr, nil) }()
 	}
-
 	// maybe request passphrase for bls key.
 	if *cmkEncryptedBLSKey == "" {
 		passphraseForBLS()
@@ -440,12 +439,12 @@ func setupConsensusAndNode(nodeConfig *nodeconfig.ConfigType) *node.Node {
 	})
 
 	if err != nil {
-		_, _ = fmt.Fprintf(os.Stderr, "Error :%v \n", err)
+		fmt.Fprintf(os.Stderr, "Error :%v \n", err)
 		os.Exit(1)
 	}
 	commitDelay, err := time.ParseDuration(*delayCommit)
 	if err != nil || commitDelay < 0 {
-		_, _ = fmt.Fprintf(os.Stderr, "ERROR invalid commit delay %#v", *delayCommit)
+		fmt.Fprintf(os.Stderr, "ERROR invalid commit delay %#v", *delayCommit)
 		os.Exit(1)
 	}
 	currentConsensus.SetCommitDelay(commitDelay)
@@ -537,7 +536,7 @@ func setupConsensusAndNode(nodeConfig *nodeconfig.ConfigType) *node.Node {
 	// update consensus information based on the blockchain
 	currentConsensus.SetMode(currentConsensus.UpdateConsensusInformation())
 	// Setup block period and block due time.
-	currentConsensus.BlockPeriod = time.Duration(*blockPeriod) * time.Second
+	currentConsensus.BlockPeriod = time.Duration(3500 * time.Millisecond)
 	currentConsensus.NextBlockDue = time.Now()
 	return currentNode
 }
@@ -616,7 +615,7 @@ func main() {
 	case "explorer":
 		break
 	default:
-		_, _ = fmt.Fprintf(os.Stderr, "Unknown node type: %s\n", *nodeType)
+		fmt.Fprintf(os.Stderr, "Unknown node type: %s\n", *nodeType)
 		os.Exit(1)
 	}
 
@@ -650,13 +649,12 @@ func main() {
 		devnetConfig, err := shardingconfig.NewInstance(
 			uint32(*devnetNumShards), *devnetShardSize, *devnetHarmonySize, numeric.OneDec(), genesis.HarmonyAccounts, genesis.FoundationalNodeAccounts, nil, shardingconfig.VLBPE)
 		if err != nil {
-			_, _ = fmt.Fprintf(os.Stderr, "ERROR invalid devnet sharding config: %s",
-				err)
+			fmt.Fprintf(os.Stderr, "ERROR invalid devnet sharding config: %s", err)
 			os.Exit(1)
 		}
 		shard.Schedule = shardingconfig.NewFixedSchedule(devnetConfig)
 	default:
-		_, _ = fmt.Fprintf(os.Stderr, "invalid network type: %#v\n", *networkType)
+		fmt.Fprintf(os.Stderr, "invalid network type: %#v\n", *networkType)
 		os.Exit(2)
 	}
 
@@ -759,13 +757,17 @@ func main() {
 		Msg(startMsg)
 
 	go currentNode.SupportSyncing()
-	currentNode.ServiceManagerSetup()
 	currentNode.RunServices()
 	// RPC for SDK not supported for mainnet.
 	if err := currentNode.StartRPC(*port); err != nil {
 		utils.Logger().Warn().
 			Err(err).
 			Msg("StartRPC failed")
+	}
+
+	if err := currentNode.BootstrapConsensus(); err != nil {
+		fmt.Println("could not get consensus yet", err.Error())
+		os.Exit(-1)
 	}
 
 	if err := currentNode.Start(); err != nil {
